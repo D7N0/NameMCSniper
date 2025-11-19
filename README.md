@@ -6,6 +6,10 @@
 
 **A professional-grade Minecraft username sniper with advanced features**
 
+## 🪶 Recommended Proxies
+[BirdProxies.com](https://birdproxies.com?ref=YOURCODE)  
+Get 10% off + 15% extra data using the link above!
+
 [![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Code Style](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
