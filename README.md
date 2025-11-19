@@ -7,7 +7,7 @@
 **A professional-grade Minecraft username sniper with advanced features**
 
 ## 🪶 Recommended Proxies
-[BirdProxies.com]([https://birdproxies.com?ref=YOURCODE](https://www.birdproxies.com/@NAMEMCSNIPER))  
+[BirdProxies.com](https://www.birdproxies.com/@NAMEMCSNIPER))  
 Get 10% off + 15% extra data using the link above!
 
 [![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://python.org)
