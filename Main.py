@@ -15,6 +15,7 @@ import sys
 import signal
 from pathlib import Path
 from datetime import datetime, timezone
+from typing import List, Dict, Any, Optional
 
 import click
 from rich.console import Console
@@ -22,9 +23,9 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.text import Text
 
-from config import ConfigManager, AppConfig
-from sniper import UsernameSniper
-from logger import setup_logging, get_logger
+from src.config.config import ConfigManager, AppConfig
+from src.core.sniper import UsernameSniper
+from src.utils.logger import setup_logging, get_logger
 
 console = Console()
 logger = get_logger(__name__)
@@ -209,7 +210,7 @@ def config_validate(config):
 @click.option('--config', '-c', default='config.yaml', help='Configuration file path')
 def test_proxies(config):
     """Test proxy connections"""
-    from proxy_manager import ProxyManager
+    from src.network.proxy_manager import ProxyManager
     
     config_manager = ConfigManager(config)
     app_config = config_manager.load_config()
@@ -475,12 +476,178 @@ def test_token(config):
     asyncio.run(test_bearer_token())
 
 @cli.command()
+@click.option('--config', '-c', default='config.yaml', help='Configuration file path')
+@click.option('--output', '-o', default='proxies_working.txt', help='Output file for working proxies')
+@click.option('--concurrency', default=50, help='Number of concurrent checks', type=int)
+def check_proxies(config, output, concurrency):
+    """Check and validate all configured proxies"""
+    try:
+        console.print(f"[dim]Debug: Loading config from {config}[/dim]")
+        config_manager = ConfigManager(config)
+        app_config = config_manager.load_config()
+        
+        console.print(f"[dim]Debug: Config loaded. Proxy enabled: {app_config.proxy.enabled}[/dim]")
+        
+        if not app_config.proxy.enabled or not app_config.proxy.proxies:
+            console.print("[red]❌ Proxies are not enabled or list is empty[/red]")
+            return
+            
+        proxies = app_config.proxy.proxies
+        console.print(f"[dim]Debug: Proxies type: {type(proxies)}, Len: {len(proxies)}[/dim]")
+
+        console.print(Panel.fit(
+            f"🚀 Starting Proxy Checker\n"
+            f"proxies: [bold]{len(proxies)}[/bold]\n"
+            f"Threads: [bold]{concurrency}[/bold]",
+            title="Proxy Checker",
+            border_style="cyan"
+        ))
+        
+        async def run_check():
+            from src.network.proxy_checker import ProxyChecker
+            checker = ProxyChecker(app_config)
+            
+            with console.status(f"[bold green]Checking {len(proxies)} proxies...[/bold green]"):
+                results = await checker.check_all(max_concurrent=concurrency)
+                
+            alive = [r for r in results if r['status'] == 'alive']
+            dead = [r for r in results if r['status'] != 'alive']
+            
+            # Display results
+            console.print(f"\n[bold green]✅ Working: {len(alive)}[/bold green]")
+            console.print(f"[bold red]❌ Dead: {len(dead)}[/bold red]")
+            
+            if alive:
+                # Calculate stats
+                if any(r['latency_ms'] for r in alive):
+                    avg_latency = sum(r['latency_ms'] for r in alive) / len(alive)
+                    console.print(f"[cyan]Average Latency: {avg_latency:.1f}ms[/cyan]")
+                
+                # Save working proxies
+                try:
+                    with open(output, 'w', encoding='utf-8') as f:
+                        for r in alive:
+                            f.write(f"{r['proxy']}\n")
+                    console.print(f"[green]💾 Saved {len(alive)} working proxies to {output}[/green]")
+                except Exception as e:
+                    console.print(f"[red]Failed to save output: {e}[/red]")
+            else:
+                console.print("[yellow]⚠️ No working proxies found![/yellow]")
+
+        asyncio.run(run_check())
+        
+    except Exception as e:
+        console.print(f"[bold red]❌ Critical Error in check_proxies: {e}[/bold red]")
+        import traceback
+        traceback.print_exc()
+
+@cli.command()
+@click.option('--config', '-c', default='config.yaml', help='Configuration file path')
+def check_accounts(config):
+    """Validate all configured bearer tokens"""
+    config_manager = ConfigManager(config)
+    app_config = config_manager.load_config()
+    
+    tokens = app_config.snipe.bearer_tokens
+    
+    if not tokens:
+        console.print("[red]❌ No bearer tokens configured[/red]")
+        return
+        
+    console.print(Panel.fit(
+        f"🚀 Starting Account Validator\n"
+        f"Tokens to check: [bold]{len(tokens)}[/bold]",
+        title="Account Validator",
+        border_style="cyan"
+    ))
+    
+    async def run_check():
+        from src.core.account_checker import AccountValidator
+        validator = AccountValidator(app_config)
+        
+        with console.status(f"[bold green]Checking {len(tokens)} tokens...[/bold green]"):
+            results = await validator.check_all()
+            
+        valid = [r for r in results if r['valid']]
+        invalid = [r for r in results if not r['valid']]
+        
+        console.print(f"\n[bold green]✅ Valid: {len(valid)}[/bold green]")
+        console.print(f"[bold red]❌ Invalid: {len(invalid)}[/bold red]")
+        
+        # Determine max name length for padding
+        max_name_len = max([len(r.get('name', '')) for r in valid]) if valid else 0
+        max_name_len = max(max_name_len, 4) # min 4 chars
+        
+        if valid:
+            console.print("\n[u]Valid Accounts:[/u]")
+            for r in valid:
+                console.print(f"  [green]• {r.get('name'):<{max_name_len}}[/green] [dim]({r.get('masked')})[/dim]")
+                
+        if invalid:
+            console.print("\n[u]Invalid Tokens:[/u]")
+            for r in invalid:
+                console.print(f"  [red]• {r.get('masked')}[/red] - {r.get('error')}")
+
+    asyncio.run(run_check())
+
+@cli.command()
 def version():
     """Show version information"""
     console.print(Panel.fit(
         Text("NameMC Sniper v2.0.0\nMinecraft Username Sniper with Drop Window Estimation", justify="center"),
         style="bold blue"
     ))
+
+@cli.command()
+@click.option('--requests', '-r', default=10, help='Number of benchmark requests')
+@click.option('--config', '-c', default='config.yaml', help='Configuration file path')
+def benchmark(requests, config):
+    """Run a timing benchmark to test system precision"""
+    config_manager = ConfigManager(config)
+    app_config = config_manager.load_config()
+    
+    sniper = UsernameSniper(app_config)
+    
+    console.print(Panel.fit(
+        f"🚀 Running Timing Benchmark\n"
+        f"High Priority: {app_config.performance.high_priority}\n"
+        f"GC Disabled: {app_config.performance.gc_disable}\n"
+        f"Busy Wait: {app_config.performance.busy_wait_ms}ms",
+        title="Benchmark",
+        style="bold magenta"
+    ))
+    
+    async def run():
+        stats = await sniper.run_benchmark(requests=requests)
+        
+        if not stats:
+            console.print("[red]Benchmark failed to produce results[/red]")
+            return
+            
+        table = Table(title="Benchmark Results (Microseconds)")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="green")
+        
+        table.add_row("Mean Offset", f"{stats['mean_offset_us']:.1f} μs")
+        table.add_row("Median Offset", f"{stats['median_offset_us']:.1f} μs")
+        table.add_row("Jitter (StdDev)", f"{stats['stdev_us']:.1f} μs")
+        table.add_row("Max Offset", f"{stats['max_us']:.1f} μs")
+        
+        console.print(table)
+        
+        # Rating
+        jitter = stats['stdev_us']
+        if jitter < 100:
+            rating = "[bold green]EXCELLENT (Pro Level)[/bold green]"
+        elif jitter < 1000:
+            rating = "[bold yellow]GOOD (Competitive)[/bold yellow]"
+        else:
+            rating = "[bold red]POOR (Optimization Needed)[/bold red]"
+            
+        console.print(f"\nSystem Rating: {rating}")
+        console.print("[dim]Note: Lower offset/jitter is better. 1000μs = 1ms[/dim]")
+
+    asyncio.run(run())
 
 if __name__ == "__main__":
     cli()

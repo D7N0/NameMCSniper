@@ -16,11 +16,11 @@ from rich.panel import Panel
 from rich.text import Text
 from rich.align import Align
 
-from config import ConfigManager
-from sniper import UsernameSniper
-from proxy_manager import ProxyManager
-from discord_notifier import DiscordNotifier
-from logger import setup_logging
+from src.config.config import ConfigManager
+from src.core.sniper import UsernameSniper
+from src.network.proxy_manager import ProxyManager
+from src.notifications.discord_notifier import DiscordNotifier
+from src.utils.logger import setup_logging
 
 console = Console()
 
@@ -74,6 +74,9 @@ class NameMCSniperCLI:
 [bold green]│[/bold green] [bold white][2][/bold white] Fallback Snipe           [bold green]│[/bold green] [bold green]│[/bold green] [bold white][12][/bold white] Edit Config            [bold green]│[/bold green] [bold green]│[/bold green] [bold white][22][/bold white] Test Proxies           [bold green]│[/bold green]
 [bold green]│[/bold green]                              [bold green]│[/bold green] [bold green]│[/bold green] [bold white][13][/bold white] Validate Config        [bold green]│[/bold green] [bold green]│[/bold green] [bold white][23][/bold white] View Logs              [bold green]│[/bold green]
 [bold green]│[/bold green]                              [bold green]│[/bold green] [bold green]│[/bold green] [bold white][14][/bold white] Reset Config           [bold green]│[/bold green] [bold green]│[/bold green] [bold white][24][/bold white] System Info            [bold green]│[/bold green]
+[bold green]│[/bold green]                              [bold green]│[/bold green] [bold green]│[/bold green]                            [bold green]│[/bold green] [bold green]│[/bold green] [bold white][25][/bold white] Benchmark System       [bold green]│[/bold green]
+[bold green]│[/bold green]                              [bold green]│[/bold green] [bold green]│[/bold green]                            [bold green]│[/bold green] [bold green]│[/bold green] [bold white][26][/bold white] Check Proxies          [bold green]│[/bold green]
+[bold green]│[/bold green]                              [bold green]│[/bold green] [bold green]│[/bold green]                            [bold green]│[/bold green] [bold green]│[/bold green] [bold white][27][/bold white] Check Accounts         [bold green]│[/bold green]
 [bold green]└─────────────────────────────┘[/bold green] [bold green]└───────────────────────────┘[/bold green] [bold green]└───────────────────────────┘[/bold green]
 
 [bold green]┌─[/bold green] [bold yellow]Discord & Notifications[/bold yellow] [bold green]───┐[/bold green] [bold green]┌─[/bold green] [bold yellow]Advanced Options[/bold yellow] [bold green]────────┐[/bold green] [bold green]┌─[/bold green] [bold yellow]Help & Support[/bold yellow] [bold green]─────────┐[/bold green]
@@ -801,6 +804,189 @@ class NameMCSniperCLI:
         
         console.input("\n[dim]Press Enter to continue...[/dim]")
     
+    async def benchmark_system(self):
+        """Run timing benchmark"""
+        self.clear_screen()
+        console.print("[bold yellow]⚡ System Benchmark[/bold yellow]\n")
+        
+        try:
+            self.config = self.config_manager.load_config()
+            
+            console.print("[cyan]This will test your system's timing precision.[/cyan]")
+            console.print("[dim]The benchmark measures how accurately your system can execute timed operations.[/dim]\n")
+            
+            num_requests = self.get_user_input("Number of benchmark requests (default: 10)")
+            if not num_requests:
+                num_requests = 10
+            else:
+                try:
+                    num_requests = int(num_requests)
+                except ValueError:
+                    self.show_error("Invalid number, using default (10)")
+                    num_requests = 10
+            
+            from src.core.sniper import UsernameSniper
+            from rich.table import Table
+            
+            sniper = UsernameSniper(self.config)
+            
+            console.print(f"\n[green]Running {num_requests} benchmark requests...[/green]")
+            with console.status("[bold green]Benchmarking..."):
+                stats = await sniper.run_benchmark(requests=num_requests)
+            
+            if not stats:
+                self.show_error("Benchmark failed to produce results")
+                return
+            
+            # Create results table
+            table = Table(title="Benchmark Results (Microseconds)", show_header=True)
+            table.add_column("Metric", style="cyan")
+            table.add_column("Value", style="green")
+            
+            table.add_row("Mean Offset", f"{stats['mean_offset_us']:.1f} μs")
+            table.add_row("Median Offset", f"{stats['median_offset_us']:.1f} μs")
+            table.add_row("Jitter (StdDev)", f"{stats['stdev_us']:.1f} μs")
+            table.add_row("Max Offset", f"{stats['max_us']:.1f} μs")
+            
+            console.print(table)
+            
+            # Rating
+            jitter = stats['stdev_us']
+            if jitter < 100:
+                rating = "[bold green]EXCELLENT (Pro Level)[/bold green]"
+                advice = "Your system has exceptional timing precision!"
+            elif jitter < 1000:
+                rating = "[bold yellow]GOOD (Competitive)[/bold yellow]"
+                advice = "Your system has good timing precision for most snipes."
+            else:
+                rating = "[bold red]POOR (Optimization Needed)[/bold red]"
+                advice = "Consider closing background apps and enabling performance mode in config."
+            
+            console.print(f"\n[cyan]System Rating:[/cyan] {rating}")
+            console.print(f"[dim]{advice}[/dim]")
+            console.print("[dim]Note: Lower offset/jitter is better. 1000μs = 1ms[/dim]")
+            
+        except Exception as e:
+            self.show_error(f"Benchmark failed: {e}")
+        
+        console.input("\n[dim]Press Enter to continue...[/dim]")
+    
+    async def check_proxies_menu(self):
+        """Check and validate proxies"""
+        self.clear_screen()
+        console.print("[bold yellow]🌐 Proxy Checker[/bold yellow]\n")
+        
+        try:
+            self.config = self.config_manager.load_config()
+            
+            if not self.config.proxy.enabled or not self.config.proxy.proxies:
+                self.show_error("No proxies configured! Add proxies to proxies.txt and enable in config.yaml")
+                return
+            
+            console.print(f"[green]Found {len(self.config.proxy.proxies)} proxies to check[/green]")
+            console.print("[dim]This will test connectivity and measure latency for each proxy.[/dim]\n")
+            
+            concurrency = self.get_user_input("Concurrent checks (default: 50)")
+            if not concurrency:
+                concurrency = 50
+            else:
+                try:
+                    concurrency = int(concurrency)
+                except ValueError:
+                    concurrency = 50
+            
+            from src.network.proxy_checker import ProxyChecker
+            from rich.table import Table
+            
+            checker = ProxyChecker(self.config)
+            
+            console.print(f"\n[green]Checking proxies with {concurrency} concurrent workers...[/green]")
+            with console.status("[bold green]Testing proxies..."):
+                results = await checker.check_all(max_concurrent=concurrency)
+            
+            alive = [r for r in results if r['status'] == 'alive']
+            dead = [r for r in results if r['status'] != 'alive']
+            
+            console.print(f"\n[bold green]✅ Working: {len(alive)}[/bold green]")
+            console.print(f"[bold red]❌ Dead: {len(dead)}[/bold red]")
+            
+            if alive:
+                avg_latency = sum(r['latency_ms'] for r in alive if r['latency_ms']) / len(alive)
+                console.print(f"[cyan]Average Latency: {avg_latency:.1f}ms[/cyan]")
+                
+                # Show top 5 fastest proxies
+                console.print("\n[bold cyan]Top 5 Fastest Proxies:[/bold cyan]")
+                sorted_proxies = sorted(alive, key=lambda x: x['latency_ms'] if x['latency_ms'] else float('inf'))[:5]
+                for i, proxy in enumerate(sorted_proxies, 1):
+                    console.print(f"  {i}. [green]{proxy['proxy']}[/green] - {proxy['latency_ms']:.1f}ms")
+                
+                # Ask to save
+                save = self.get_user_input("\nSave working proxies to proxies_working.txt? (y/N)")
+                if save.lower() == 'y':
+                    try:
+                        with open('proxies_working.txt', 'w', encoding='utf-8') as f:
+                            for r in alive:
+                                f.write(f"{r['proxy']}\n")
+                        console.print(f"[green]💾 Saved {len(alive)} working proxies![/green]")
+                    except Exception as e:
+                        console.print(f"[red]Failed to save: {e}[/red]")
+            else:
+                console.print("[yellow]⚠️ No working proxies found![/yellow]")
+            
+        except Exception as e:
+            self.show_error(f"Proxy check failed: {e}")
+        
+        console.input("\n[dim]Press Enter to continue...[/dim]")
+    
+    async def check_accounts_menu(self):
+        """Validate bearer tokens"""
+        self.clear_screen()
+        console.print("[bold yellow]🔑 Account Validator[/bold yellow]\n")
+        
+        try:
+            self.config = self.config_manager.load_config()
+            
+            tokens = self.config.snipe.bearer_tokens
+            if not tokens:
+                self.show_error("No bearer tokens configured! Add tokens to config.yaml")
+                return
+            
+            console.print(f"[green]Found {len(tokens)} token(s) to validate[/green]")
+            console.print("[dim]This will check if each token is valid and retrieve account info.[/dim]\n")
+            
+            from src.core.account_checker import AccountValidator
+            from rich.table import Table
+            
+            validator = AccountValidator(self.config)
+            
+            console.print("[green]Validating tokens...[/green]")
+            with console.status("[bold green]Checking accounts..."):
+                results = await validator.check_all()
+            
+            valid = [r for r in results if r['valid']]
+            invalid = [r for r in results if not r['valid']]
+            
+            console.print(f"\n[bold green]✅ Valid: {len(valid)}[/bold green]")
+            console.print(f"[bold red]❌ Invalid: {len(invalid)}[/bold red]")
+            
+            if valid:
+                console.print("\n[bold cyan]Valid Accounts:[/bold cyan]")
+                for r in valid:
+                    console.print(f"  [green]• {r.get('name')}[/green] [dim]({r.get('uuid')[:8]}...{r.get('uuid')[-4:]})[/dim]")
+            
+            if invalid:
+                console.print("\n[bold red]Invalid Tokens:[/bold red]")
+                for r in invalid:
+                    console.print(f"  [red]• {r.get('masked')}[/red] - {r.get('error')}")
+            
+            if invalid:
+                console.print("\n[yellow]⚠️ Invalid tokens should be replaced before sniping![/yellow]")
+            
+        except Exception as e:
+            self.show_error(f"Account validation failed: {e}")
+        
+        console.input("\n[dim]Press Enter to continue...[/dim]")
+    
     def show_help(self):
         """Show help information"""
         help_text = """[bold cyan]NameMC Sniper Help[/bold cyan]
@@ -885,6 +1071,12 @@ This tool is for educational purposes only. Please comply with Minecraft's Terms
                     self.view_logs()
                 elif choice == "24":
                     self.system_info()
+                elif choice == "25":
+                    await self.benchmark_system()
+                elif choice == "26":
+                    await self.check_proxies_menu()
+                elif choice == "27":
+                    await self.check_accounts_menu()
                 elif choice == "31":
                     await self.setup_discord_webhook()
                 elif choice == "32":

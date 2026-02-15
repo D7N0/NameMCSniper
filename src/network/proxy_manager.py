@@ -10,13 +10,28 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ProxyInfo:
-    """Information about a proxy"""
+    """Information about a proxy with health tracking"""
     url: str
     working: bool = True
     last_used: float = 0
     fail_count: int = 0
+    success_count: int = 0
     response_time: float = 0
     last_check: float = 0
+    consecutive_failures: int = 0
+    
+    @property
+    def success_rate(self) -> float:
+        """Calculate success rate (0.0 to 1.0)"""
+        total = self.success_count + self.fail_count
+        if total == 0:
+            return 1.0
+        return self.success_count / total
+    
+    @property
+    def is_healthy(self) -> bool:
+        """Check if proxy is healthy (>20% success rate and <5 consecutive failures)"""
+        return self.success_rate > 0.2 and self.consecutive_failures < 5
 
 class ProxyManager:
     """Manages proxy rotation and health checking"""
@@ -37,41 +52,89 @@ class ProxyManager:
         logger.info(f"Initialized proxy manager with {len(self.proxies)} proxies")
     
     async def get_proxy(self) -> Optional[str]:
-        """Get the next available proxy"""
+        """Get the next available healthy proxy"""
         if not self.proxies:
             return None
         
         if not self.rotation_enabled:
-            # Return first working proxy
+            # Return first healthy proxy
             for proxy_info in self.proxies.values():
-                if proxy_info.working and proxy_info.url not in self.bad_proxies:
+                if proxy_info.working and proxy_info.is_healthy and proxy_info.url not in self.bad_proxies:
                     return proxy_info.url
             return None
         
-        # Rotation enabled - get next proxy in round-robin fashion
-        working_proxies = [
+        # Rotation enabled - get next healthy proxy in round-robin fashion
+        healthy_proxies = [
             proxy for proxy, info in self.proxies.items() 
-            if info.working and proxy not in self.bad_proxies
+            if info.working and info.is_healthy and proxy not in self.bad_proxies
         ]
         
-        if not working_proxies:
+        if not healthy_proxies:
             # Try to recover some bad proxies
             await self._recover_proxies()
-            working_proxies = [
+            healthy_proxies = [
                 proxy for proxy, info in self.proxies.items() 
-                if info.working and proxy not in self.bad_proxies
+                if info.working and info.is_healthy and proxy not in self.bad_proxies
             ]
         
-        if not working_proxies:
-            logger.warning("No working proxies available")
+        if not healthy_proxies:
+            logger.warning("No healthy proxies available")
             return None
         
         # Round-robin selection
-        proxy = working_proxies[self.current_index % len(working_proxies)]
+        proxy = healthy_proxies[self.current_index % len(healthy_proxies)]
         self.current_index += 1
         self.proxies[proxy].last_used = time.time()
         
         return proxy
+    
+    def mark_proxy_success(self, proxy_url: str, response_time: float = 0):
+        """Mark a proxy as successful and update health stats"""
+        if proxy_url in self.proxies:
+            proxy_info = self.proxies[proxy_url]
+            proxy_info.success_count += 1
+            proxy_info.consecutive_failures = 0  # Reset consecutive failures
+            proxy_info.working = True
+            if response_time > 0:
+                proxy_info.response_time = response_time
+            
+            # Remove from bad proxies if it was there
+            if proxy_url in self.bad_proxies:
+                self.bad_proxies.remove(proxy_url)
+                logger.info(f"Proxy {proxy_url} recovered (success rate: {proxy_info.success_rate:.1%})")
+    
+    def mark_proxy_failure(self, proxy_url: str, error: str = ""):
+        """Mark a proxy as failed and update health stats"""
+        if proxy_url in self.proxies:
+            proxy_info = self.proxies[proxy_url]
+            proxy_info.fail_count += 1
+            proxy_info.consecutive_failures += 1
+            
+            # Auto-disable if too many consecutive failures
+            if proxy_info.consecutive_failures >= 5:
+                proxy_info.working = False
+                self.bad_proxies.add(proxy_url)
+                logger.warning(f"Proxy {proxy_url} auto-disabled (5 consecutive failures)")
+            elif proxy_info.success_rate < 0.2 and (proxy_info.success_count + proxy_info.fail_count) > 10:
+                proxy_info.working = False
+                self.bad_proxies.add(proxy_url)
+                logger.warning(f"Proxy {proxy_url} auto-disabled (success rate: {proxy_info.success_rate:.1%})")
+            else:
+                logger.debug(f"Proxy {proxy_url} failed ({proxy_info.consecutive_failures} consecutive, {proxy_info.success_rate:.1%} success rate)")
+    
+    def get_proxy_stats(self) -> Dict[str, any]:
+        """Get statistics about proxy health"""
+        healthy = sum(1 for p in self.proxies.values() if p.is_healthy)
+        working = sum(1 for p in self.proxies.values() if p.working)
+        total = len(self.proxies)
+        
+        return {
+            'total': total,
+            'healthy': healthy,
+            'working': working,
+            'disabled': total - working,
+            'health_rate': healthy / total if total > 0 else 0
+        }
     
     async def mark_proxy_bad(self, proxy_url: str) -> None:
         """Mark a proxy as bad/non-working"""

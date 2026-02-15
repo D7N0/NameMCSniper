@@ -34,7 +34,8 @@ class DiscordNotifier:
             self.session = None
     
     def _create_embed(self, title: str, description: str, color: int = None, 
-                     fields: list = None, timestamp: datetime = None) -> Dict[str, Any]:
+                     fields: list = None, timestamp: datetime = None, 
+                     thumbnail_url: str = None) -> Dict[str, Any]:
         """Create a Discord embed"""
         embed = {
             "title": title,
@@ -42,13 +43,16 @@ class DiscordNotifier:
             "color": color or self.embed_color,
             "timestamp": (timestamp or datetime.now(timezone.utc)).isoformat(),
             "footer": {
-                "text": "NameMC Sniper",
-                "icon_url": "https://namemc.com/favicon.ico"
+                "text": "NameMC Sniper • Pro Edition",
+                "icon_url": "https://media.discordapp.net/attachments/1076182638848417853/1076182767223480370/sniper.png"
             }
         }
         
         if fields:
             embed["fields"] = fields
+            
+        if thumbnail_url:
+            embed["thumbnail"] = {"url": thumbnail_url}
         
         return embed
     
@@ -144,40 +148,65 @@ class DiscordNotifier:
     
     async def notify_snipe_result(self, username: str, success: bool, 
                                 attempts: int, response_time: float = None, 
-                                error_message: str = None) -> bool:
+                                error_message: str = None, proxy: str = None) -> bool:
         """Send notification with snipe result"""
         if success:
-            title = f"✅ Username Claimed Successfully!"
-            description = f"Successfully claimed **{username}**!"
-            color = 0x00ff00  # Green for success
+            title = f"🎉 SNIPED! Claimed {username}"
+            description = f"**{username}** is now yours! 🏆"
+            color = 0x00ff00  # Green
+            # Try to show the new skin (might be cached/steve for a bit)
+            thumbnail = f"https://minotar.net/helm/{username}/128.png"
         else:
-            title = f"❌ Username Claim Failed"
-            description = f"Failed to claim **{username}**"
-            color = 0xff0000  # Red for failure
+            title = f"❌ Missed {username}"
+            description = f"Failed to claim **{username}**."
+            color = 0xff0000  # Red
+            thumbnail = None
         
         fields = [
             {
-                "name": "Attempts Made",
-                "value": str(attempts),
+                "name": "⚡ Attempts",
+                "value": f"`{attempts}`",
                 "inline": True
             }
         ]
         
         if response_time:
             fields.append({
-                "name": "Response Time",
-                "value": f"{response_time:.2f}ms",
+                "name": "⏱️ Latency",
+                "value": f"`{response_time:.2f}ms`",
+                "inline": True
+            })
+            
+        if proxy and success:
+             fields.append({
+                "name": "🌐 Proxy",
+                "value": f"||{proxy}||", # Spoiler protection
                 "inline": True
             })
         
         if error_message:
             fields.append({
-                "name": "Error",
-                "value": error_message,
+                "name": "🛑 Error",
+                "value": f"```{error_message}```",
                 "inline": False
             })
+            
+        # Add a "Quick Login" link or NameMC link
+        fields.append({
+            "name": "🔗 Links",
+            "value": f"[NameMC](https://namemc.com/profile/{username}) • [LabyNet](https://laby.net/@{username})",
+            "inline": False
+        })
         
-        return await self.send_notification(title, description, color, fields, mention_role=True)
+        embed = self._create_embed(title, description, color, fields, thumbnail_url=thumbnail)
+        
+        content = ""
+        if success and self.mention_role_id:
+            content = f"<@&{self.mention_role_id}>"
+        
+        if self.webhook_url:
+            return await self.send_webhook_notification(embed, content)
+        return False
     
     async def notify_error(self, error_type: str, error_message: str) -> bool:
         """Send error notification"""
