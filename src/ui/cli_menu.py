@@ -1014,7 +1014,7 @@ Example: [bold]12/25/2024 • 3∶30∶00 PM[/bold]
     
     def show_about(self):
         """Show about information"""
-        about_text = f"""[bold cyan]NameMC Sniper v2.0.0[/bold cyan]
+        about_text = f"""[bold cyan]NameMC Sniper v2.1.0[/bold cyan]
 
 [yellow]Authors:[/yellow]
 • [bold]zwroe[/bold] - github.com/zwroee

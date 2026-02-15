@@ -402,7 +402,7 @@ For comprehensive documentation, examples, and advanced configuration:
 
 ## 📋 Changelog
 
-### v2.0.0 - Pro Performance Edition (Latest)
+### v2.1.0 - Pro Performance Edition (Latest)
 
 **🚀 Major Performance Improvements:**
 - ✅ Connection pooling with persistent sessions (20-30ms latency reduction)

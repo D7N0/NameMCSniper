@@ -115,7 +115,7 @@ class NameMCSniper:
         console.print(table)
 
 @click.group()
-@click.version_option(version="1.0.0", prog_name="NameMC Sniper")
+@click.version_option(version="2.1.0", prog_name="NameMC Sniper")
 def cli():
     """NameMC Sniper - CLI Minecraft Username Sniper"""
     pass
