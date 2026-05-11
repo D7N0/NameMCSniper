@@ -9,11 +9,15 @@ Fast Minecraft username sniping with a simple CLI, token checks, proxy support, 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 </div>
 
+<div align="center">
+
 ## 🪶 Recommended Proxies
 
 [BirdProxies.com](https://www.birdproxies.com/@NAMEMCSNIPER)
 
 Get 10% off + 15% extra data using the link above!
+
+</div>
 
 ## What It Does
 
