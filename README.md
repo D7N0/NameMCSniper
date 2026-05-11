@@ -1,5 +1,3 @@
-# NameMC Sniper
-
 <div align="center">
 
 <img width="2188" height="740" alt="download (12)" src="https://github.com/user-attachments/assets/7afb7ed5-e4d0-4e35-820c-01fc639f9d98" />
