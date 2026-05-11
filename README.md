@@ -1,7 +1,5 @@
-# NameMC Sniper
-
 <div align="center">
-<img width="1536" height="324" alt="NameMC Sniper Banner" src="https://github.com/user-attachments/assets/cf0a9ba6-a318-424b-a163-82f34b9915b0" />
+<img width="2188" height="740" alt="download (12)" src="https://github.com/user-attachments/assets/c9ff5adc-7f55-45e2-bad1-11ac2c397dc0" />
 
 Fast Minecraft username sniping with a simple CLI, token checks, proxy support, and precise drop timing.
 
