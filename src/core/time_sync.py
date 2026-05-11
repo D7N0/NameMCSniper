@@ -9,7 +9,12 @@ import aiohttp
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
-import json
+
+try:
+    import ntplib
+    _HAS_NTPLIB = True
+except ImportError:
+    _HAS_NTPLIB = False
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +39,12 @@ class TimeSync:
         
         offsets = []
         
+        # Try NTP first - it's more reliable on VPS and works even when HTTP APIs are blocked
+        ntp_offset = await asyncio.get_event_loop().run_in_executor(None, lambda: self._get_ntp_offset_sync())
+        if ntp_offset is not None:
+            offsets.append(ntp_offset)
+            logger.debug(f"NTP offset: {ntp_offset:.3f}s")
+        
         for source in self.sync_sources:
             try:
                 offset = await self._get_time_offset(source)
@@ -41,14 +52,15 @@ class TimeSync:
                     offsets.append(offset)
                     logger.debug(f"Time source {source}: offset {offset:.3f}s")
             except Exception as e:
-                logger.warning(f"Failed to sync with {source}: {e}")
+                logger.debug(f"Could not reach time API {source}: {e}")
                 continue
         
         if not offsets:
             # If all internet sources fail, use local system time as fallback
-            logger.warning("⚠️ All internet time sources failed, using local system time")
-            logger.warning("⚠️ Time accuracy may be reduced - consider checking your internet connection")
-            logger.warning("⚠️ For competitive sniping, ensure your system clock is NTP-synchronized")
+            # On a VPS the system clock is usually NTP-synced by the host, so this is fine
+            logger.warning("⚠️ All internet time sources unreachable (likely firewall/network restriction on this VPS)")
+            logger.warning("⚠️ Falling back to local system clock. On a VPS this is usually accurate (host NTP).")
+            logger.warning("⚠️ If you see large timing errors, run: sudo ntpdate pool.ntp.org  OR  sudo timedatectl set-ntp true")
             
             # Set minimal offset (assume system time is reasonably accurate)
             self.time_offset = 0.0
@@ -84,6 +96,27 @@ class TimeSync:
         
         return True
     
+    def _get_ntp_offset_sync(self) -> Optional[float]:
+        """Synchronous wrapper for NTP offset - run in executor"""
+        if not _HAS_NTPLIB:
+            return None
+        
+        ntp_servers = [
+            'pool.ntp.org',
+            'time.cloudflare.com',
+            'time.google.com',
+            'time.windows.com',
+        ]
+        
+        client = ntplib.NTPClient()
+        for server in ntp_servers:
+            try:
+                response = client.request(server, version=3, timeout=3)
+                return response.offset
+            except Exception:
+                continue
+        return None
+
     def _parse_worldtimeapi(self, data: dict) -> Optional[datetime]:
         """Parse worldtimeapi.org response"""
         try:

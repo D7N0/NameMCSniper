@@ -7,7 +7,11 @@ import asyncio
 import aiohttp
 import time
 import statistics
+import sys
 from datetime import datetime
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 async def test_minecraft_api_speed(bearer_token: str, num_tests: int = 10):
     """Test speed to Minecraft API"""

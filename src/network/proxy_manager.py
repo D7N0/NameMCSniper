@@ -1,12 +1,19 @@
 import asyncio
 import aiohttp
-import random
 import time
-from typing import List, Optional, Dict, Set
+from typing import Any, List, Optional, Dict, Set
 from dataclasses import dataclass
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_proxy_url(proxy_url: str) -> str:
+    """Ensure aiohttp receives a proxy URL with an explicit scheme."""
+    proxy_url = proxy_url.strip()
+    if proxy_url.startswith(("http://", "https://", "socks4://", "socks5://")):
+        return proxy_url
+    return f"http://{proxy_url}"
 
 @dataclass
 class ProxyInfo:
@@ -47,7 +54,8 @@ class ProxyManager:
         
         # Initialize proxy info objects
         for proxy_url in proxy_list:
-            self.proxies[proxy_url] = ProxyInfo(url=proxy_url)
+            normalized = normalize_proxy_url(proxy_url)
+            self.proxies[normalized] = ProxyInfo(url=normalized)
         
         logger.info(f"Initialized proxy manager with {len(self.proxies)} proxies")
     
@@ -122,7 +130,7 @@ class ProxyManager:
             else:
                 logger.debug(f"Proxy {proxy_url} failed ({proxy_info.consecutive_failures} consecutive, {proxy_info.success_rate:.1%} success rate)")
     
-    def get_proxy_stats(self) -> Dict[str, any]:
+    def get_proxy_stats(self) -> Dict[str, Any]:
         """Get statistics about proxy health"""
         healthy = sum(1 for p in self.proxies.values() if p.is_healthy)
         working = sum(1 for p in self.proxies.values() if p.working)
@@ -213,7 +221,7 @@ class ProxyManager:
         
         await asyncio.gather(*recovery_tasks, return_exceptions=True)
     
-    def get_proxy_stats(self) -> Dict[str, any]:
+    def get_proxy_stats(self) -> Dict[str, Any]:
         """Get statistics about proxy performance"""
         working_proxies = sum(1 for info in self.proxies.values() if info.working)
         bad_proxies = len(self.bad_proxies)

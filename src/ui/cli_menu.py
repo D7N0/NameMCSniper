@@ -21,6 +21,11 @@ from src.core.sniper import UsernameSniper
 from src.network.proxy_manager import ProxyManager
 from src.notifications.discord_notifier import DiscordNotifier
 from src.utils.logger import setup_logging
+from src.utils.time_parser import (
+    NAMEMC_TIME_FORMAT,
+    display_namemc_time,
+    parse_namemc_time,
+)
 
 console = Console()
 
@@ -134,6 +139,16 @@ class NameMCSniperCLI:
         panel = Panel(content, title=f"[bold green]{title}[/bold green]", border_style="green")
         console.print(panel)
         console.input("\n[dim]Press Enter to continue...[/dim]")
+
+    def _setup_run_logging(self) -> str:
+        """Create the log file used by menu-launched sniper runs."""
+        log_file = f"logs/namemc_sniper_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        setup_logging(
+            log_level=self.config.log_level if self.config else "INFO",
+            log_file=log_file,
+            debug_mode=self.config.debug_mode if self.config else False,
+        )
+        return str(Path(log_file).resolve())
     
     async def _get_account_info(self, bearer_token: str) -> dict:
         """Get Minecraft account info from bearer token"""
@@ -169,33 +184,8 @@ class NameMCSniperCLI:
             }
     
     def _parse_namemc_time(self, drop_window: str) -> datetime:
-        """Parse NameMC drop time format: '9/30/2025 • 11∶46∶32 PM'"""
-        # Validate format
-        if '•' not in drop_window or '∶' not in drop_window:
-            raise ValueError("Invalid format! Use exact NameMC format with • and ∶")
-        
-        try:
-            from datetime import timedelta
-            import time as time_module
-            
-            # Clean the format: replace NameMC special characters
-            clean_window = drop_window.replace('•', '').replace('∶', ':').strip()
-            parsed_time = datetime.strptime(clean_window, '%m/%d/%Y %I:%M:%S %p')
-            
-            # NameMC displays times in the user's local timezone, convert to UTC
-            # Get the user's local timezone offset
-            local_offset_seconds = -time_module.timezone if time_module.daylight == 0 else -time_module.altzone
-            local_offset = timedelta(seconds=local_offset_seconds)
-            local_tz = timezone(local_offset)
-            
-            # Set as local time, then convert to UTC
-            parsed_time = parsed_time.replace(tzinfo=local_tz)
-            parsed_time = parsed_time.astimezone(timezone.utc)
-            
-            return parsed_time
-            
-        except ValueError as e:
-            raise ValueError(f"Could not parse time format. Expected: M/D/YYYY • H∶MM∶SS AM/PM, got: {drop_window}")
+        """Parse NameMC drop time format, accepting regular or special colons."""
+        return parse_namemc_time(drop_window)
     
     # Menu option handlers
     def create_config(self):
@@ -256,32 +246,15 @@ class NameMCSniperCLI:
             return
         
         console.print("\n[cyan]Enter drop time in NameMC format:[/cyan]")
-        console.print("[dim]Example: 12/25/2024 • 3∶30∶00 PM[/dim]")
+        console.print("[dim]Example: 6/7/2026 • 6:06:50 PM[/dim]")
         drop_window = self.get_user_input("Drop window")
         
         if not drop_window:
             self.show_error("Drop window is required!")
             return
         
-        # Validate format
-        if '•' not in drop_window or '∶' not in drop_window:
-            self.show_error("Invalid format! Use exact NameMC format with • and ∶")
-            return
-        
         try:
-            # Parse time (simplified version)
-            from datetime import datetime, timezone, timedelta
-            import time as time_module
-            
-            clean_window = drop_window.replace('•', '').replace('∶', ':').strip()
-            parsed_time = datetime.strptime(clean_window, '%m/%d/%Y %I:%M:%S %p')
-            
-            # Convert to UTC (simplified)
-            local_offset_seconds = -time_module.timezone if time_module.daylight == 0 else -time_module.altzone
-            local_offset = timedelta(seconds=local_offset_seconds)
-            local_tz = timezone(local_offset)
-            parsed_time = parsed_time.replace(tzinfo=local_tz)
-            parsed_time = parsed_time.astimezone(timezone.utc)
+            parsed_time = self._parse_namemc_time(drop_window)
             
             # Check if time is in future
             now = datetime.now(timezone.utc)
@@ -306,6 +279,7 @@ class NameMCSniperCLI:
             # Load config first to get bearer token
             self.config = self.config_manager.load_config()
             self.config.snipe.target_username = username
+            log_file = self._setup_run_logging()
             
             # Clear screen and show startup message
             self.clear_screen()
@@ -325,20 +299,39 @@ class NameMCSniperCLI:
             console.print(f"[cyan]Target Username:[/cyan] [bold white]{username}[/bold white]")
             console.print(f"[cyan]Drop Time:[/cyan] [bold white]{parsed_time.strftime('%Y-%m-%d %H:%M:%S UTC')}[/bold white]")
             console.print(f"[cyan]Status:[/cyan] [bold yellow]ACTIVE - Waiting for drop time...[/bold yellow]")
+            console.print(f"[cyan]Log File:[/cyan] [dim]{log_file}[/dim]")
             
-            # Show countdown
-            time_until = (parsed_time - datetime.now(timezone.utc)).total_seconds()
-            if time_until > 0:
-                hours = int(time_until // 3600)
-                minutes = int((time_until % 3600) // 60)
-                seconds = int(time_until % 60)
-                console.print(f"[cyan]Time Until Drop:[/cyan] [bold yellow]{hours}h {minutes}m {seconds}s[/bold yellow]")
-            
-            console.print(f"\n[bold green]✅ Sniper is now running! Check logs for detailed progress.[/bold green]")
+            console.print(f"\n[bold green]✅ Sniper is now running! Timer below will tick down.[/bold green]")
             console.print(f"[dim]Press Ctrl+C to stop the sniper if needed.[/dim]\n")
             
+            # Live countdown that actually ticks
+            from rich.live import Live
+            from rich.text import Text as RichText
+            
             sniper = UsernameSniper(self.config)
-            result = await sniper.snipe_at_time(parsed_time, username)
+            
+            # Run sniper concurrently with countdown display
+            snipe_task = asyncio.create_task(sniper.snipe_at_time(parsed_time, username))
+            
+            try:
+                with Live(refresh_per_second=2, console=console) as live:
+                    while not snipe_task.done():
+                        now = datetime.now(timezone.utc)
+                        time_until = (parsed_time - now).total_seconds()
+                        if time_until > 0:
+                            hours = int(time_until // 3600)
+                            minutes = int((time_until % 3600) // 60)
+                            secs = int(time_until % 60)
+                            live.update(
+                                RichText(f"⏳ Time Until Drop: {hours:02d}h {minutes:02d}m {secs:02d}s", style="bold yellow")
+                            )
+                        else:
+                            live.update(RichText("🚨 Drop time reached — sniping now!", style="bold red"))
+                        await asyncio.sleep(0.5)
+            except Exception:
+                pass
+            
+            result = await snipe_task
             
             if result.success:
                 self.show_success(f"Successfully claimed {username}!")
@@ -372,12 +365,11 @@ class NameMCSniperCLI:
         drop_times = []
         for i in range(num_drops):
             while True:
-                time_input = self.get_user_input(f"Drop time {i+1} (NameMC format: M/D/YYYY • H∶MM∶SS AM/PM)")
+                time_input = self.get_user_input(f"Drop time {i+1} (NameMC format: {NAMEMC_TIME_FORMAT})")
                 if not time_input:
                     return
                 
                 try:
-                    # Parse NameMC format: "9/30/2025 • 11∶46∶32 PM"
                     parsed_time = self._parse_namemc_time(time_input)
                     
                     # Check if time is in the future
@@ -387,12 +379,12 @@ class NameMCSniperCLI:
                     
                     drop_times.append(parsed_time)
                     console.print(f"[green]✅ Drop time {i+1} set: {parsed_time.strftime('%Y-%m-%d %H:%M:%S UTC')}[/green]")
-                    console.print(f"[dim]    Original: {time_input}[/dim]")
+                    console.print(f"[dim]    Original: {display_namemc_time(time_input)}[/dim]")
                     break
                     
                 except ValueError as e:
                     self.show_error(f"Invalid NameMC format! {str(e)}")
-                    console.print("[yellow]Example: 9/30/2025 • 11∶46∶32 PM[/yellow]")
+                    console.print("[yellow]Example: 6/7/2026 • 6:06:50 PM[/yellow]")
                     continue
         
         # Load config
@@ -421,6 +413,7 @@ class NameMCSniperCLI:
         
         # Load config and override username
         self.config.snipe.target_username = username
+        log_file = self._setup_run_logging()
         
         # Clear screen and show startup message
         self.clear_screen()
@@ -441,6 +434,7 @@ class NameMCSniperCLI:
         console.print(f"[cyan]Drop Windows:[/cyan] [bold white]{len(drop_times)}[/bold white]")
         console.print(f"[cyan]Status:[/cyan] [bold yellow]ACTIVE - Monitoring drop times...[/bold yellow]")
         console.print(f"[cyan]Next Window:[/cyan] [bold white]{drop_times[0].strftime('%Y-%m-%d %H:%M:%S UTC')}[/bold white]")
+        console.print(f"[cyan]Log File:[/cyan] [dim]{log_file}[/dim]")
         
         # Show live status
         time_until_first = (drop_times[0] - datetime.now(timezone.utc)).total_seconds()
@@ -1000,11 +994,11 @@ class NameMCSniperCLI:
 • [bold]High-Speed Sniping[/bold] - 10 concurrent workers
 • [bold]Proxy Support[/bold] - Rotate through multiple proxies
 • [bold]Discord Notifications[/bold] - Real-time updates
-• [bold]Precise Timing[/bold] - Starts 0.1s before drop
+• [bold]Precise Timing[/bold] - Starts 0.4s before drop
 
 [yellow]Time Format:[/yellow]
-Use NameMC's exact format: [bold]MM/DD/YYYY • H∶MM∶SS AM/PM[/bold]
-Example: [bold]12/25/2024 • 3∶30∶00 PM[/bold]
+Use NameMC's exact format: [bold]M/D/YYYY • H:MM:SS AM/PM[/bold]
+Example: [bold]6/7/2026 • 6:06:50 PM[/bold]
 
 [yellow]Support:[/yellow]
 • GitHub: [bold]github.com/zwroee/NameMcSniper[/bold]

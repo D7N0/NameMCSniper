@@ -35,6 +35,11 @@ class RateLimitTracker:
         self.token_limits[token_key]['last_limited'] = time.time()
         self.token_limits[token_key]['backoff_until'] = time.time() + retry_after
         logger.debug(f"Token ...{token_key} rate limited until {self.token_limits[token_key]['backoff_until']}")
+
+    def seconds_until_available(self, token: str) -> float:
+        """Return seconds remaining before a token can be tried again."""
+        token_key = token[-8:] if token else "default"
+        return max(0.0, self.token_limits[token_key]['backoff_until'] - time.time())
     
     def get_best_token(self, tokens: list) -> str:
         """Get the token with the least recent rate limiting"""
@@ -122,9 +127,7 @@ class UsernameSniper:
                 use_dns_cache=True,
                 keepalive_timeout=30,  # Keep connections alive for 30s
                 enable_cleanup_closed=True,
-                force_close=False,  # Reuse connections
-                # TCP optimizations
-                ssl=False  # Minecraft API uses HTTP
+                force_close=False  # Reuse connections
             )
             
             timeout_seconds = self.config.proxy.timeout if self.proxy_manager else 5
@@ -320,12 +323,18 @@ class UsernameSniper:
             if self.config.performance.high_priority:
                 try:
                     p = psutil.Process(os.getpid())
-                    # Windows specific priority classes
                     if sys.platform == "win32":
                         p.nice(psutil.HIGH_PRIORITY_CLASS)
                         logger.info("🚀 Process priority set to HIGH")
                     else:
-                        p.nice(-10) # Unix nice value
+                        p.nice(-10)  # Unix nice value (requires root)
+                        logger.info("🚀 Process priority set to HIGH (nice -10)")
+                except (PermissionError, psutil.AccessDenied):
+                    logger.warning(
+                        "⚠️ Could not set high process priority (requires root on Linux). "
+                        "The sniper will continue normally — this is non-fatal. "
+                        "To enable it, run the sniper with: sudo python menu.py"
+                    )
                 except Exception as e:
                     logger.warning(f"Failed to set process priority: {e}")
 
@@ -454,15 +463,31 @@ class UsernameSniper:
             )
         
         # Dynamic concurrency: start with configured amount
-        worker_count = self.config.snipe.concurrent_requests
-        logger.info(f"🔥 Starting with {len(tokens)} tokens and {worker_count} workers")
+        worker_count = max(1, self.config.snipe.concurrent_requests)
+        max_attempts = max(0, self.config.snipe.max_snipe_attempts)
+        per_worker_limit = None
+        if max_attempts:
+            per_worker_limit = max(1, (max_attempts + worker_count - 1) // worker_count)
+
+        logger.info(
+            f"🔥 Starting with {len(tokens)} token(s), {worker_count} workers"
+            + (f", max {max_attempts} attempts" if max_attempts else "")
+        )
         
         # Create workers - distributed across multiple tokens
+        success_event = asyncio.Event()
         workers = []
         for i in range(worker_count):
-            # Distribute workers evenly across available tokens
-            token = tokens[i % len(tokens)]
-            worker = asyncio.create_task(self._snipe_worker(username, stop_time, token))
+            worker = asyncio.create_task(
+                self._snipe_worker(
+                    username=username,
+                    stop_time=stop_time,
+                    tokens=tokens,
+                    worker_index=i,
+                    success_event=success_event,
+                    max_attempts=per_worker_limit,
+                )
+            )
             workers.append(worker)
         
         try:
@@ -513,13 +538,21 @@ class UsernameSniper:
             error_message=None if success else "Failed to claim username"
         )
     
-    async def _snipe_worker(self, username: str, stop_time: float, bearer_token: str = None) -> Dict[str, Any]:
+    async def _snipe_worker(
+        self,
+        username: str,
+        stop_time: float,
+        tokens: List[str],
+        worker_index: int,
+        success_event: asyncio.Event,
+        max_attempts: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """Individual sniping worker with smart retry logic"""
         attempts = 0
         consecutive_failures = 0
         backoff_multiplier = 1.0
         worker_id = id(asyncio.current_task())
-        token_info = f" (Token: ...{bearer_token[-8:]})" if bearer_token else ""
+        ordered_tokens = tokens[worker_index % len(tokens):] + tokens[:worker_index % len(tokens)]
         
         # Error tracking for this worker
         error_stats = {
@@ -529,10 +562,31 @@ class UsernameSniper:
             'auth_errors': 0
         }
         
-        logger.info(f"Worker {worker_id}{token_info} started sniping {username}")
-        
-        while time.time() < stop_time:
+        logger.info(f"Worker {worker_id} started sniping {username}")
+
+        async def sleep_or_stop(delay: float) -> None:
+            if delay <= 0:
+                await asyncio.sleep(0)
+                return
             try:
+                await asyncio.wait_for(success_event.wait(), timeout=delay)
+            except asyncio.TimeoutError:
+                pass
+        
+        while time.time() < stop_time and not success_event.is_set():
+            if max_attempts is not None and attempts >= max_attempts:
+                break
+
+            try:
+                if self.config.snipe.per_token_rate_limiting:
+                    bearer_token = self.rate_limit_tracker.get_best_token(ordered_tokens)
+                    wait_time = self.rate_limit_tracker.seconds_until_available(bearer_token)
+                    if wait_time > 0:
+                        await sleep_or_stop(min(wait_time, 0.5))
+                        continue
+                else:
+                    bearer_token = ordered_tokens[attempts % len(ordered_tokens)]
+
                 result = await self._claim_username(username, bearer_token)
                 attempts += 1
                 self._connection_stats['requests_made'] += 1
@@ -544,6 +598,7 @@ class UsernameSniper:
                 if result.get('success'):
                     logger.info(f"🎉 Worker {worker_id} SUCCESS after {attempts} attempts!")
                     logger.info(f"Worker {worker_id} stats: {error_stats}")
+                    success_event.set()
                     return {'success': True, 'attempts': attempts, 'errors': error_stats}
                 
                 # Smart error classification and retry logic
@@ -559,20 +614,20 @@ class UsernameSniper:
                     backoff_multiplier = min(backoff_multiplier * 1.5, 3.0)  # Cap at 3x
                     
                     logger.warning(f"Worker {worker_id} rate limited, backing off {backoff_time:.2f}s")
-                    await asyncio.sleep(backoff_time)
+                    await sleep_or_stop(backoff_time)
                     consecutive_failures += 1
                     
                 elif status == 403:  # Forbidden (account cooldown or invalid token)
                     error_stats['auth_errors'] += 1
                     logger.warning(f"Worker {worker_id} hit auth error (403), waiting 2s")
-                    await asyncio.sleep(2.0)
+                    await sleep_or_stop(2.0)
                     consecutive_failures += 1
                     
-                elif status and status >= 500:  # Server error
+                elif isinstance(status, int) and status >= 500:  # Server error
                     error_stats['server_errors'] += 1
                     # Immediate retry for server errors (they're temporary)
                     logger.warning(f"Worker {worker_id} server error ({status}), immediate retry")
-                    await asyncio.sleep(0.05)  # Tiny delay
+                    await sleep_or_stop(0.05)  # Tiny delay
                     consecutive_failures += 1
                     
                 else:  # Success response or username taken
@@ -582,12 +637,12 @@ class UsernameSniper:
                     
                     # Use configured delay for normal requests
                     delay_seconds = self.config.snipe.request_delay_ms / 1000.0
-                    await asyncio.sleep(delay_seconds)
+                    await sleep_or_stop(delay_seconds)
                 
                 # Circuit breaker: if too many consecutive failures, increase delay
                 if consecutive_failures > 10:
                     logger.warning(f"Worker {worker_id} circuit breaker: too many failures, pausing 1s")
-                    await asyncio.sleep(1.0)
+                    await sleep_or_stop(1.0)
                     consecutive_failures = 0
                 
             except asyncio.TimeoutError:
@@ -596,7 +651,7 @@ class UsernameSniper:
                 attempts += 1
                 consecutive_failures += 1
                 # Immediate retry for timeouts
-                await asyncio.sleep(0.01)
+                await sleep_or_stop(0.01)
                 
             except aiohttp.ClientError as e:
                 error_stats['network_errors'] += 1
@@ -604,13 +659,13 @@ class UsernameSniper:
                 attempts += 1
                 consecutive_failures += 1
                 # Short delay for network errors
-                await asyncio.sleep(0.1)
+                await sleep_or_stop(0.1)
                 
             except Exception as e:
                 logger.error(f"Worker {worker_id} unexpected error: {e}")
                 attempts += 1
                 consecutive_failures += 1
-                await asyncio.sleep(0.1)
+                await sleep_or_stop(0.1)
         
         logger.info(f"Worker {worker_id} finished with {attempts} attempts (no success)")
         logger.info(f"Worker {worker_id} final stats: {error_stats}")
@@ -650,6 +705,8 @@ class UsernameSniper:
             
             async with self.session.put(url, headers=headers, proxy=proxy, timeout=aiohttp.ClientTimeout(total=2)) as response:
                 response_text = await response.text()
+                if proxy and self.proxy_manager:
+                    self.proxy_manager.mark_proxy_success(proxy)
                 
                 # Log detailed response for debugging
                 proxy_info = f" via {proxy}" if proxy else " (direct)"
@@ -702,18 +759,24 @@ class UsernameSniper:
                 
                 return {
                     'success': response.status == 200,
-                    'status_code': response.status,
+                    'status': response.status,
                     'username': username,
                     'response': response_text
                 }
         except asyncio.TimeoutError:
             logger.warning(f"Timeout claiming {username}")
+            if proxy and self.proxy_manager:
+                self.proxy_manager.mark_proxy_failure(proxy, "timeout")
             return {'success': False, 'error': 'Request timeout', 'status': 'timeout'}
         except aiohttp.ClientError as e:
             logger.error(f"Network error claiming {username}: {e}")
+            if proxy and self.proxy_manager:
+                self.proxy_manager.mark_proxy_failure(proxy, str(e))
             return {'success': False, 'error': f'Network error: {str(e)}', 'status': 'network_error'}
         except Exception as e:
             logger.error(f"Unexpected error claiming {username}: {e}")
+            if proxy and self.proxy_manager:
+                self.proxy_manager.mark_proxy_failure(proxy, str(e))
             return {'success': False, 'error': str(e), 'status': 'unknown_error'}
     
     async def run_benchmark(self, duration: int = 5, requests: int = 10) -> Dict[str, float]:

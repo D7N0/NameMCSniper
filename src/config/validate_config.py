@@ -6,7 +6,10 @@ Configuration validator for NameMC Sniper
 import yaml
 import sys
 from pathlib import Path
-from config import ConfigManager, SnipeConfig
+from src.config.config import ConfigManager
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 def validate_config(config_path: str = "config.yaml"):
     """Validate sniper configuration"""
@@ -48,6 +51,12 @@ def validate_config(config_path: str = "config.yaml"):
         # Now try to load with ConfigManager
         config_manager = ConfigManager(config_path)
         config = config_manager.load_config()
+        errors = config_manager.validate_config()
+        if errors:
+            print(f"\n❌ Configuration errors:")
+            for error in errors:
+                print(f"   • {error}")
+            return False
         
         # Validate snipe configuration
         snipe_config = config.snipe

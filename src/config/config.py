@@ -1,4 +1,3 @@
-import os
 import yaml
 from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -53,11 +52,6 @@ class SnipeConfig(BaseModel):
         if self.bearer_tokens:
             self.bearer_tokens = [t.strip() for t in self.bearer_tokens if t and t.strip()]
             
-        # Warn if tokens are suspiciously short (but don't fail, maybe they are valid in some context)
-        for i, token in enumerate(self.bearer_tokens):
-            if len(token) < 50:
-                print(f"⚠️ Warning: Token #{i+1} seems too short ({len(token)} chars)")
-                
         return self
 
     @field_validator('concurrent_requests')
@@ -133,8 +127,7 @@ class ConfigManager:
                 self._load_proxies_from_file()
 
         except Exception as e:
-            print(f"Error loading config: {e}")
-            self.create_default_config()
+            raise ValueError(f"Error loading config {self.config_path}: {e}") from e
         
         return self.config
 
@@ -189,11 +182,21 @@ class ConfigManager:
         """
         errors = []
         
-        if not self.config.snipe.target_username:
-            errors.append("Target username is required")
-        
-        if not self.config.snipe.bearer_token and not self.config.snipe.bearer_tokens:
+        tokens = self.config.snipe.bearer_tokens or (
+            [self.config.snipe.bearer_token] if self.config.snipe.bearer_token else []
+        )
+        placeholder_tokens = {
+            "bearer_token",
+            "your_minecraft_bearer_token_here",
+            "your_first_minecraft_bearer_token_here",
+            "your_second_minecraft_bearer_token_here",
+            "your_third_minecraft_bearer_token_here",
+        }
+
+        if not tokens:
             errors.append("Bearer token is required for Minecraft API authentication")
+        elif any(token.strip().lower() in placeholder_tokens or len(token.strip()) < 50 for token in tokens):
+            errors.append("Bearer token appears to be missing, placeholder, or too short")
         
         if self.config.discord.enabled:
             if not self.config.discord.webhook_url and not self.config.discord.bot_token:

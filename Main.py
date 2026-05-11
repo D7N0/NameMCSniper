@@ -26,6 +26,11 @@ from rich.text import Text
 from src.config.config import ConfigManager, AppConfig
 from src.core.sniper import UsernameSniper
 from src.utils.logger import setup_logging, get_logger
+from src.utils.time_parser import (
+    NAMEMC_TIME_FORMAT,
+    display_namemc_time,
+    parse_namemc_time,
+)
 
 console = Console()
 logger = get_logger(__name__)
@@ -68,7 +73,7 @@ class NameMCSniper:
         )
     
     async def start_sniping(self):
-        """Start the sniping process"""
+        """Start an immediate claim attempt from the plain snipe command."""
         try:
             self.sniper = UsernameSniper(self.config)
             self.running = True
@@ -77,14 +82,26 @@ class NameMCSniper:
             def signal_handler(signum, frame):
                 logger.info("Received shutdown signal")
                 self.running = False
-                if self.sniper:
-                    asyncio.create_task(self.sniper.stop_monitoring())
             
             signal.signal(signal.SIGINT, signal_handler)
             signal.signal(signal.SIGTERM, signal_handler)
             
-            # Start monitoring
-            await self.sniper.start_monitoring()
+            result = await self.sniper.snipe_at_time(
+                datetime.now(timezone.utc),
+                self.config.snipe.target_username,
+            )
+
+            if result.success:
+                console.print(Panel.fit(
+                    f"SUCCESS! Claimed username '{result.username}' with {result.attempts} attempts",
+                    style="bold green",
+                ))
+            else:
+                console.print(Panel.fit(
+                    f"FAILED to claim '{result.username}'. Attempts: {result.attempts}\n"
+                    f"Error: {result.error_message or 'Unknown'}",
+                    style="bold red",
+                ))
             
         except KeyboardInterrupt:
             logger.info("Interrupted by user")
@@ -93,7 +110,7 @@ class NameMCSniper:
             console.print(f"[red]Error: {e}[/red]")
         finally:
             if self.sniper:
-                await self.sniper.stop_monitoring()
+                await self.sniper.cleanup()
             self.running = False
     
     def display_config_summary(self):
@@ -137,6 +154,7 @@ def snipe(config, username, token):
         app.config.snipe.target_username = username
     if token:
         app.config.snipe.bearer_token = token
+        app.config.snipe.bearer_tokens = [token]
     
     # Validate required fields
     if not app.config.snipe.target_username:
@@ -249,48 +267,14 @@ def test_proxies(config):
 @cli.command()
 @click.option('--config', '-c', default='config.yaml', help='Configuration file path')
 @click.option('--username', '-u', required=True, help='Username to snipe')
-@click.option('--drop-window', '-w', required=True, help='Drop window format: "9/29/2025 • 9∶04∶09 PM" (EXACT FORMAT REQUIRED)')
+@click.option('--drop-window', '-w', required=True, help='Drop window format: "6/7/2026 • 6:06:50 PM"')
 def snipe_at(config, username, drop_window):
-    """Snipe a username at the specified time (starts 0.1s before, continues 10s after)"""
+    """Snipe a username at the specified time (starts 0.4s before, continues ~10s after)"""
     config_manager = ConfigManager(config)
     app_config = config_manager.load_config()
     
-    # Parse ONLY the exact drop window format: "9/29/2025 • 9∶04∶09 PM"
     try:
-        from datetime import datetime, timezone, timedelta
-        
-        # Validate exact format first
-        if '•' not in drop_window or '∶' not in drop_window:
-            console.print(f"[red]Error: Invalid format. Must use EXACT format: '9/29/2025 • 9∶04∶09 PM'[/red]")
-            console.print(f"[red]Your input: '{drop_window}'[/red]")
-            console.print(f"[red]Required: bullet (•) and special colons (∶)[/red]")
-            return
-        
-        # Clean up the format - replace special characters
-        clean_window = drop_window.replace('•', '').replace('∶', ':').strip()
-        
-        # Try to parse the datetime - EXACT format only
-        try:
-            # Expected format after cleaning: "9/29/2025 9:04:09 PM"
-            parsed_time = datetime.strptime(clean_window, '%m/%d/%Y %I:%M:%S %p')
-        except ValueError:
-            console.print(f"[red]Error: Invalid format. Must use EXACT format: '9/29/2025 • 9∶04∶09 PM'[/red]")
-            console.print(f"[red]Your input: '{drop_window}'[/red]")
-            console.print(f"[red]Expected: M/D/YYYY • H∶MM∶SS AM/PM[/red]")
-            return
-        # NameMC displays times in the user's local timezone
-        # Convert from local timezone to UTC
-        import time
-        from datetime import datetime, timezone, timedelta
-        
-        # Get the user's local timezone offset
-        local_offset_seconds = -time.timezone if time.daylight == 0 else -time.altzone
-        local_offset = timedelta(seconds=local_offset_seconds)
-        local_tz = timezone(local_offset)
-        
-        # Apply user's local timezone to parsed time
-        parsed_time = parsed_time.replace(tzinfo=local_tz)
-        parsed_time = parsed_time.astimezone(timezone.utc)
+        parsed_time = parse_namemc_time(drop_window)
         
         # Check if time is in the future (allow 60 seconds grace period for clock drift)
         now = datetime.now(timezone.utc)
@@ -304,9 +288,8 @@ def snipe_at(config, username, drop_window):
         
         time_until = (parsed_time - now).total_seconds()
         # Show both local and UTC times for clarity
-        local_time = parsed_time.astimezone(local_tz)
-        clean_display = drop_window.replace('•', ' ').replace('∶', ':')
-        console.print(f"[green]SUCCESS[/green] Drop window parsed: {clean_display}")
+        local_time = parsed_time.astimezone()
+        console.print(f"[green]SUCCESS[/green] Drop window parsed: {display_namemc_time(drop_window)}")
         console.print(f"Local Time: {local_time.strftime('%Y-%m-%d %I:%M:%S %p')}")
         console.print(f"UTC Time: {parsed_time.strftime('%Y-%m-%d %H:%M:%S UTC')}")
         console.print(f"Time until drop: {time_until/3600:.2f} hours ({time_until:.0f} seconds)")
@@ -318,7 +301,7 @@ def snipe_at(config, username, drop_window):
     async def run_snipe():
         console.print(f"[cyan]Starting sniper for username: {username}[/cyan]")
         console.print(f"[cyan]Drop time: {parsed_time.isoformat()}[/cyan]")
-        console.print(f"[yellow]Sniping will start 0.1 seconds before drop time and continue for 10 seconds after[/yellow]")
+        console.print(f"[yellow]Sniping will start 0.4 seconds before drop time and continue for about 10 seconds after[/yellow]")
         
         # Create and run sniper
         sniper = UsernameSniper(app_config)
@@ -340,13 +323,13 @@ def snipe_at(config, username, drop_window):
 
 @cli.command()
 @click.option('--username', '-u', required=True, help='Username to snipe')
-@click.option('--times', '-t', required=True, multiple=True, help='Drop times in NameMC format "M/D/YYYY • H∶MM∶SS AM/PM" (can specify multiple)')
+@click.option('--times', '-t', required=True, multiple=True, help='Drop times in NameMC format "6/7/2026 • 6:06:50 PM" (can specify multiple)')
 @click.option('--config', '-c', default='config.yaml', help='Configuration file path')
 def snipe_fallback(username, times, config):
     """Snipe a username with multiple fallback drop times"""
     if len(times) < 2:
         console.print("[red]❌ Please provide at least 2 drop times for fallback sniping[/red]")
-        console.print("[yellow]Example: python Main.py snipe-fallback -u Username -t \"12/25/2024 • 3∶30∶00 PM\" -t \"12/25/2024 • 3∶31∶00 PM\"[/yellow]")
+        console.print("[yellow]Example: python Main.py snipe-fallback -u Username -t \"6/7/2026 • 6:06:50 PM\" -t \"6/7/2026 • 6:07:20 PM\"[/yellow]")
         return
     
     # Load configuration
@@ -364,28 +347,7 @@ def snipe_fallback(username, times, config):
     drop_times = []
     for time_str in times:
         try:
-            # Parse NameMC format: "9/30/2025 • 11∶46∶32 PM"
-            if '•' not in time_str or '∶' not in time_str:
-                console.print(f"[red]❌ Invalid NameMC format: '{time_str}'[/red]")
-                console.print("[yellow]Use format: M/D/YYYY • H∶MM∶SS AM/PM[/yellow]")
-                return
-            
-            # Clean the format: replace NameMC special characters
-            import time as time_module
-            from datetime import timedelta
-            
-            clean_window = time_str.replace('•', '').replace('∶', ':').strip()
-            parsed_time = datetime.strptime(clean_window, '%m/%d/%Y %I:%M:%S %p')
-            
-            # NameMC displays times in the user's local timezone, convert to UTC
-            # Get the user's local timezone offset
-            local_offset_seconds = -time_module.timezone if time_module.daylight == 0 else -time_module.altzone
-            local_offset = timedelta(seconds=local_offset_seconds)
-            local_tz = timezone(local_offset)
-            
-            # Set as local time, then convert to UTC
-            parsed_time = parsed_time.replace(tzinfo=local_tz)
-            parsed_time = parsed_time.astimezone(timezone.utc)
+            parsed_time = parse_namemc_time(time_str)
             
             # Allow 60 second grace period for clock drift
             now = datetime.now(timezone.utc)
@@ -396,10 +358,10 @@ def snipe_fallback(username, times, config):
                 return
             
             drop_times.append(parsed_time)
-        except ValueError:
+        except ValueError as e:
             console.print(f"[red]❌ Invalid NameMC format: '{time_str}'[/red]")
-            console.print("[yellow]Use format: M/D/YYYY • H∶MM∶SS AM/PM[/yellow]")
-            console.print("[yellow]Example: 12/25/2024 • 3∶30∶00 PM[/yellow]")
+            console.print(f"[yellow]{e}[/yellow]")
+            console.print(f"[yellow]Use format: {NAMEMC_TIME_FORMAT}[/yellow]")
             return
     
     # Sort drop times

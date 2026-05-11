@@ -4,6 +4,7 @@ import time
 import logging
 from typing import List, Dict, Any, Optional
 from src.config.config import AppConfig
+from src.network.proxy_manager import normalize_proxy_url
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +20,7 @@ class ProxyChecker:
 
     async def check_proxy(self, proxy: str) -> Dict[str, Any]:
         """Check a single proxy"""
-        proxy_url = proxy
-        if not proxy.startswith("http"):
-            proxy_url = f"http://{proxy}"
+        proxy_url = normalize_proxy_url(proxy)
             
         start_time = time.time()
         status = "dead"

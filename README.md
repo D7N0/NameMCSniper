@@ -1,482 +1,124 @@
+# NameMC Sniper
+
 <div align="center">
+<img width="1536" height="324" alt="NameMC Sniper Banner" src="https://github.com/user-attachments/assets/cf0a9ba6-a318-424b-a163-82f34b9915b0" />
 
-<img width="2188" height="740" alt="download (12)" src="https://github.com/user-attachments/assets/7afb7ed5-e4d0-4e35-820c-01fc639f9d98" />
+Fast Minecraft username sniping with a simple CLI, token checks, proxy support, and precise drop timing.
 
-
-**A professional-grade Minecraft username sniper with advanced features**
-
-## 🪶 Recommended Proxies
-[BirdProxies.com](https://www.birdproxies.com/@NAMEMCSNIPER) 
-Get 10% off + 15% extra data using the link above!
-
-[![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://python.org)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Code Style](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
-
-[📚 Documentation](https://zwroee.github.io/NameMCSniper-Docs/) • [🚀 Quick Start](https://zwroee.github.io/NameMCSniper-Docs/#quick-start) • [⚙️ Configuration](https://zwroee.github.io/NameMCSniper-Docs/getting-started/configuration/) • [🤝 Support](https://zwroee.github.io/NameMCSniper-Docs/legal/support/)
-
+[![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://python.org)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 </div>
 
-## ✨ Features
+## 🪶 Recommended Proxies
 
-<table>
-<tr>
-<td width="50%">
+[BirdProxies.com](https://www.birdproxies.com/@NAMEMCSNIPER)
 
-### 🎯 **Core Features**
-- **Ultra-Fast Sniping** - 40 concurrent workers with 3μs precision
-- **Connection Pooling** - 20-30ms latency reduction per request
-- **Smart Retry Logic** - Exponential backoff with error classification
-- **Multi-Token Support** - Mass sniping with multiple accounts
-- **Rich CLI Interface** - Beautiful interactive menu with 27 options
+Get 10% off + 15% extra data using the link above!
 
-</td>
-<td width="50%">
+## What It Does
 
-### 🔧 **Advanced Features**
-- **Multi-Source Time Sync** - Fallback chain with outlier detection
-- **Proxy Health Monitoring** - Auto-disable failing proxies
-- **Dynamic Concurrency** - Adaptive worker adjustment
-- **Professional Benchmarking** - Test system timing precision
-- **Account Validation** - Bulk token testing with health stats
+NameMC Sniper waits for a NameMC drop time, syncs timing as closely as possible, then sends Minecraft name-change requests during the claim window. It supports multiple bearer tokens, connection pooling, basic proxy rotation, Discord webhooks, and a menu mode if you do not want to use commands directly.
 
-</td>
-</tr>
-</table>
-
-## 🚀 Quick Start
-
-### Prerequisites
-- Python 3.8 or higher
-- Valid Minecraft account with bearer token
-- (Optional) Discord webhook for notifications
-
-### Installation
+## Install
 
 ```bash
-# Clone the repository
-git clone https://github.com/your-username/NameMcSniper.git
+git clone https://github.com/zwroee/NameMcSniper.git
 cd NameMcSniper
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
 pip install -r requirements.txt
-
-# Create configuration file
 python Main.py config-create
 ```
 
-### First Run
+Edit `config.yaml` after it is created. Do not commit your real `config.yaml` if it contains tokens, webhooks, or proxies.
+
+## Run
+
+Menu mode:
 
 ```bash
-# Launch the interactive CLI menu (recommended for beginners)
 python menu.py
-
-# Or use command line directly
-python Main.py test-token  # Test your bearer token
-python Main.py snipe-at -u "Username" -w "12/25/2024 • 3∶30∶00 PM"  # Snipe username
 ```
 
-## ⚙️ Configuration
+Command line:
 
-### Basic Configuration (`config.yaml`)
+```bash
+python Main.py snipe-at -u "TargetName" -w "5/7/2026 • 6:06:50 PM"
+```
+
+The drop time format is:
+
+```text
+M/D/YYYY • H:MM:SS AM/PM
+```
+
+Copy it from NameMC exactly. Regular colons are supported, and the older `∶` colon style also works.
+
+## Config
+
+Keep the config conservative unless you have tested your setup.
 
 ```yaml
-# Sniping Configuration
 snipe:
-  target_username: "YourDesiredUsername"
-  bearer_token: "your_minecraft_bearer_token_here"
-  start_sniping_at_seconds: 0
+  target_username: "TargetName"
+  bearer_token: "your_minecraft_bearer_token"
+  bearer_tokens:
+    - "your_minecraft_bearer_token"
+  concurrent_requests: 10
+  request_delay_ms: 20
   max_snipe_attempts: 3000
-  request_delay_ms: 8
-  concurrent_requests: 40
 
-# Discord Notifications
-discord:
-  enabled: true
-  webhook_url: "https://discord.com/api/webhooks/YOUR_WEBHOOK_URL"
-  mention_role_id: "123456789012345678"  # Optional
-  embed_color: 65280  # Green
+performance:
+  high_priority: true
+  pre_warm_connections: true
+  busy_wait_ms: 50
 
-# Proxy Configuration (Optional)
 proxy:
   enabled: false
-  proxies:
-    - "http://username:password@proxy1.example.com:8080"
-    - "http://proxy2.example.com:3128"
-  rotation_enabled: true
-  timeout: 10
-  max_retries: 3
-
-# Logging
-debug_mode: false
-log_level: "INFO"
+  proxies: []
 ```
 
-### 🔑 Getting Your Bearer Token
-
-<details>
-<summary><strong>Method 1: Browser Developer Tools (Recommended)</strong></summary>
-
-1. Open [minecraft.net](https://minecraft.net) and log in
-2. Press `F12` to open Developer Tools
-3. Go to the **Network** tab
-4. Navigate to any Minecraft service page
-5. Look for requests with `Authorization: Bearer <token>`
-6. Copy the token (long string after "Bearer ")
-
-</details>
-
-<details>
-<summary><strong>Method 2: Using Authentication Script</strong></summary>
-
-```python
-# Use minecraft-launcher-lib or similar
-import minecraft_launcher_lib
-
-# Authenticate and get token
-# (Implementation depends on chosen library)
-```
-
-</details>
-
-## 🎮 Usage
-
-### Interactive CLI Menu (Recommended)
-
-Launch the beautiful interactive menu interface:
+Useful checks:
 
 ```bash
-# Start the interactive CLI menu
-python menu.py
+python Main.py test-token
+python Main.py benchmark
+python Main.py check-proxies
+python Main.py config-validate
 ```
 
-**Features:**
-- 🎨 **Beautiful ASCII Art** - Matrix-style green interface
-- 📋 **Organized Categories** - Easy navigation with numbered options
-- ⚡ **Real-time Testing** - Test tokens, proxies, and Discord integration
-- 🔧 **Configuration Management** - Create, validate, and manage configs
-- 📊 **System Information** - View logs, system stats, and performance data
-- 🎯 **One-Click Sniping** - Simple username sniping at specific times
+## Proxies
 
-**Menu Categories:**
-- **[1-2] Sniper Operations** - Snipe at time, fallback snipe
-- **[11-14] Configuration** - Create, edit, validate, reset config
-- **[21-27] Tools & Info** - Token test, proxy test, logs, system info, **benchmark**, **check proxies**, **check accounts**
-- **[31-33] Discord & Notifications** - Webhook setup and testing
-- **[41-43] Advanced Options** - Performance tuning, proxy manager, debug mode
-- **[51-53] Help & Support** - Documentation, about, GitHub repository
+Use HTTP or HTTPS proxies in this format:
 
-### CLI Interface Preview
-
-The interactive menu features a professional Matrix-style interface with:
-- **Green ASCII Art Logo** - Eye-catching NameMC Sniper branding
-- **Organized Menu Layout** - Clean categorized options in bordered boxes
-- **Real-time Information** - Current time display and status updates
-- **User-friendly Navigation** - Simple number-based option selection
-- **Professional Styling** - Consistent green theme throughout
-<img width="1918" height="983" alt="Screenshot 2025-09-30 063615" src="https://github.com/user-attachments/assets/387111dd-6039-46c1-b04c-73687cbb761a" />
-
-### Command Line Interface
-
-For advanced users and automation:
-
-```bash
-# Basic sniping
-python Main.py snipe -u "Username" -t "your_bearer_token"
-
-# Snipe at specific time (NameMC format)
-python Main.py snipe-at -u "Username" -w "12/25/2024 • 3∶30∶00 PM"
-
-# Configuration management
-python Main.py config-create          # Create default config
-python Main.py config-validate        # Validate current config
-
-# Testing & Validation (NEW in v2.0.0)
-python Main.py benchmark              # Test system timing precision
-python Main.py check-proxies          # Validate all proxies with health stats
-python Main.py check-accounts         # Validate all bearer tokens
-python Main.py test-token             # Test single bearer token
-
-# Help and information
-python Main.py --help                 # Show all commands
-python Main.py version                # Show version info
+```text
+http://username:password@host:port
+http://host:port
 ```
 
-### Time Format
+Residential or ISP proxies are usually the best fit. Avoid free proxies and random datacenter lists; they are often slow, blocked, or already abused. SOCKS proxies are not recommended for this build unless you add proper SOCKS support, because the current request code is built around aiohttp's normal HTTP proxy handling.
 
-The sniper uses NameMC's exact time format:
-```
-MM/DD/YYYY • H∶MM∶SS AM/PM
-```
+For best results, test direct VPS latency first. A clean VPS connection can be faster than bad proxies. Only enable proxies if they are stable, low-latency, and pass `python Main.py check-proxies`.
 
-**Examples:**
-- `12/25/2024 • 3∶30∶00 PM`
-- `1/1/2025 • 11∶45∶30 AM`
+## Notes
 
-> **Note:** Use the special bullet (•) and colon (∶) characters as shown
+- Run on a machine with a correct system clock.
+- More workers is not always better. Too many requests can trigger rate limits.
+- More valid tokens helps more than spamming one token harder.
+- If Linux cannot set high process priority, the sniper still runs; it just will not get the priority boost.
 
-## 🌐 Proxy Setup
+## VPS
 
-### Supported Formats
-```yaml
-proxies:
-  - "http://ip:port"                          # No authentication
-  - "http://username:password@ip:port"        # With authentication
-  - "https://ip:port"                         # HTTPS proxy
-  - "socks5://ip:port"                        # SOCKS5 proxy
-```
+A VPS is recommended for serious drops because it can stay online, keep a steady clock, and usually has better network stability than a home connection. If you do not have one, Oracle Cloud's free tier can work.
 
-### Proxy Testing
-```bash
-# Test all configured proxies
-python Main.py test-proxies
+Oracle free VPS downsides:
 
-# View proxy statistics in real-time
-python Main.py snipe --verbose
-```
+- Setup is more annoying than a normal paid VPS.
+- Free instances can be reclaimed or limited depending on availability.
+- Network routing is not guaranteed to be the fastest for Minecraft services.
+- ARM instances may need a little more package/setup patience.
+- You still need to secure it, keep Python updated, and avoid committing secrets.
 
-## 📢 Discord Integration
+Test your latency and timing before relying on it for an important name.
 
-### Webhook Setup (Recommended)
-1. Go to your Discord server settings
-2. Navigate to **Integrations** → **Webhooks**
-3. Click **New Webhook**
-4. Copy the webhook URL
-5. Add it to your `config.yaml`
+## Legal
 
-### Notification Types
-- **Countdown Alerts** - 1h, 30m, 5m, 1m, 30s before drop
-- **Sniping Started** - When sniping begins
-- **Success/Failure** - Final result with statistics
-- **Error Alerts** - Configuration or runtime errors
-
-## 📊 Performance Optimization
-
-### Recommended Settings
-
-| Use Case | Concurrent Requests | Request Delay | Proxy Count |
-|----------|-------------------|---------------|-------------|
-| **Conservative** | 5 | 50ms | 2-3 |
-| **Balanced** | 10 | 25ms | 5-10 |
-| **Aggressive** | 15 | 10ms | 10+ |
-
-### Network Optimization
-- Use a VPS close to Minecraft servers (US East Coast recommended)
-- Test proxy latency: `python Main.py test-proxies`
-- Monitor logs for rate limiting warnings
-
-## 🔧 Advanced Usage
-
-### Programmatic Usage
-
-```python
-import asyncio
-from datetime import datetime, timezone
-from config import ConfigManager
-from sniper import UsernameSniper
-
-async def snipe_username():
-    # Load configuration
-    config_manager = ConfigManager("config.yaml")
-    config = config_manager.load_config()
-    
-    # Create sniper instance
-    sniper = UsernameSniper(config)
-    
-    # Snipe at specific time
-    drop_time = datetime(2024, 12, 25, 15, 30, 0, tzinfo=timezone.utc)
-    result = await sniper.snipe_at_time(drop_time, "Username")
-    
-    print(f"Success: {result.success}")
-    print(f"Attempts: {result.attempts}")
-
-# Run the sniper
-asyncio.run(snipe_username())
-```
-
-### Custom Notifications
-
-```python
-from discord_notifier import DiscordNotifier
-
-async def custom_notification():
-    notifier = DiscordNotifier(webhook_url="your_webhook_url")
-    
-    async with notifier:
-        await notifier.notify_status_update("Custom message here!")
-```
-
-## 🐛 Troubleshooting
-
-<details>
-<summary><strong>Common Issues & Solutions</strong></summary>
-
-### Bearer Token Issues
-```bash
-# Error: "Bearer token is required"
-python Main.py test-token  # Validate your token
-
-# Error: "Unauthorized (401)"
-# → Token expired, get a new one from minecraft.net
-```
-
-### Proxy Issues
-```bash
-# Error: "No working proxies available"
-python Main.py test-proxies  # Check proxy health
-
-# Error: "Proxy connection failed"
-# → Verify proxy credentials and format
-```
-
-### Discord Issues
-```bash
-# Error: "Webhook failed with status 404"
-# → Check webhook URL is correct and not expired
-
-# Error: "No Discord notifications"
-# → Verify webhook URL and internet connection
-```
-
-### Rate Limiting
-```bash
-# Error: "Rate limited (429)"
-# → Increase request_delay_ms in config
-# → Reduce concurrent_requests
-# → Add more working proxies
-```
-
-</details>
-
-### Log Analysis
-```bash
-# View recent logs
-tail -f logs/namemc_sniper_*.log
-
-# Search for errors
-grep -i error logs/namemc_sniper_*.log
-
-# Monitor sniping attempts
-grep -i "claim attempt" logs/namemc_sniper_*.log
-```
-
-## 🚀 Performance
-
-### v2.0.0 Performance Improvements
-
-| Metric | Value | Description |
-|--------|-------|-------------|
-| **Timing Precision** | 3 μs | Professional-grade timing (16x better than "Pro" threshold) |
-| **Latency Reduction** | 20-30ms | Per request via connection pooling |
-| **Connection Reuse** | 80%+ | Persistent HTTP sessions |
-| **Success Rate** | +10-15% | Improvement in contested snipes |
-| **Concurrent Workers** | 40 | Simultaneous sniping threads |
-| **Smart Retry** | Exponential | 1.5x backoff multiplier, max 3x |
-| **Proxy Health** | Auto-monitor | Disables after 5 failures or <20% success rate |
-| **Time Sync** | Multi-source | Fallback chain with outlier detection |
-
-### Infrastructure Compatibility
-
-- ✅ **Oracle VPS** - Optimized for 2+ OCPUs
-- ✅ **Residential Proxies** - Compatible with premium proxy providers  
-- ✅ **Multi-Token** - Scale with multiple Microsoft accounts
-- ✅ **Global Timezones** - Automatic timezone detection
-- ✅ **Rate Limit Handling** - Smart 429 response management
-
-## 📚 Documentation
-
-For comprehensive documentation, examples, and advanced configuration:
-
-**[📖 Visit our Documentation Website](https://zwroee.github.io/NameMCSniper-Docs/)**
-
-- 🎯 **Sniping Strategies** - Multi-token and proxy optimization
-- 🔧 **API Reference** - Complete function and class documentation  
-- 📊 **Performance Tuning** - Oracle VPS and rate limiting optimization
-- 🤖 **Discord Integration** - Webhook notifications and status updates
-- 📈 **Competitive Analysis** - Success rates against different sniper types
-
-## 📋 Changelog
-
-### v2.1.0 - Pro Performance Edition (Latest)
-
-**🚀 Major Performance Improvements:**
-- ✅ Connection pooling with persistent sessions (20-30ms latency reduction)
-- ✅ Smart retry logic with exponential backoff (1.5x multiplier, max 3x)
-- ✅ Enhanced error handling with detailed per-worker statistics
-- ✅ Dynamic concurrency adjustment with automatic feedback
-- ✅ Proxy health monitoring (auto-disable failing proxies)
-- ✅ Multi-source time sync with outlier detection
-
-**✨ New Features:**
-- ✅ `[25] Benchmark System` - Test timing precision (CLI menu)
-- ✅ `[26] Check Proxies` - Validate all proxies with health stats (CLI menu)
-- ✅ `[27] Check Accounts` - Validate all bearer tokens (CLI menu)
-- ✅ `benchmark` command - Professional timing precision testing
-- ✅ `check-proxies` command - Bulk proxy validation
-- ✅ `check-accounts` command - Bulk account validation
-- ✅ S-Tier Discord embeds with rich formatting and branding
-
-**🏗️ Code Quality:**
-- ✅ Restructured codebase with proper package organization (`src/`)
-- ✅ Type hints throughout codebase
-- ✅ Pydantic config validation
-- ✅ Production-ready error handling
-- ✅ Comprehensive logging and statistics
-
-**📊 Performance Gains:**
-- 20-30ms faster per request
-- 10-15% better success rate in contested snipes
-- 80%+ connection reuse rate
-- Professional-grade timing precision (3 μs mean offset)
-
-## 👥 Contributors
-
-Thanks to these awesome people who've contributed to the project:
-
-- [@zwroee](https://github.com/zwroee) - Project creator & maintainer
-- [@zerolight18](https://github.com/zerolight18) - Co-author  
-- [@robertsmrek](https://github.com/robertsmrek) - Python 3.13 compatibility fix
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## ⚖️ Legal & Ethical Use
-
-> **Important:** This tool is for educational purposes only.
-
-- ✅ **Comply** with Minecraft's Terms of Service
-- ✅ **Respect** API rate limits and usage policies  
-- ✅ **Use responsibly** and ethically
-- ❌ **Don't** use for commercial username trading
-- ❌ **Don't** abuse or spam Minecraft services
-
-## 🆘 Support
-
-### Getting Help
-
-1. **📚 Check Documentation** - [docs website](https://zwroee.github.io/NameMCSniper-Docs/)
-2. **🔍 Search Issues** - Look for similar problems
-3. **📝 Create Issue** - Provide detailed information
-4. **💬 Discord Community** - Join our support server
-
-### Issue Template
-When reporting bugs, please include:
-- Python version and OS
-- Full error message and stack trace
-- Configuration file (remove sensitive data)
-- Steps to reproduce the issue
-
----
-
-<div align="center">
-
-**Made with ❤️ for the Minecraft community**
-
-[⭐ Star this repo](https://github.com/zwroee/NameMcSniper) • [🐛 Report Bug](https://github.com/zwroee/NameMcSniper/issues) • [💡 Request Feature](https://github.com/zwroee/NameMcSniper/issues)
-
-</div>
+Use at your own risk. Respect Minecraft's terms, API limits, and account restrictions.
