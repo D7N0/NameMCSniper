@@ -2,7 +2,8 @@
 
 <div align="center">
 
-<img width="1536" height="324" alt="assets_task_01k6cfgfnce75rr55xznbme123_1759208092_img_1" src="https://github.com/user-attachments/assets/cf0a9ba6-a318-424b-a163-82f34b9915b0" />
+<img width="2188" height="740" alt="download (12)" src="https://github.com/user-attachments/assets/7afb7ed5-e4d0-4e35-820c-01fc639f9d98" />
+
 
 **A professional-grade Minecraft username sniper with advanced features**
 
